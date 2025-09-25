@@ -287,24 +287,25 @@ def upsert_contact(api_call_type, data, user_data):
             # cTms call
             new_user = ctms.add(update_data)
 
-            # get the newsletters we need to subscribe to
-            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
+            if settings.BRAZE_SUBSCRIBE_ENABLE:
+                # map the newsletter slugs to braze ids
+                braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
 
-            braze.track_user(
-                data["email"],
-                None,
-                {"email_id": token},
-                {
-                    "country": update_data["country"],
-                    "email_format": "H",
-                    "language": update_data["lang"],
-                    "has_opted_out_of_email": False,
-                    "updated_timestamp": str(datetime.now()),
-                },
-            )
+                braze.track_user(
+                    data["email"],
+                    None,
+                    {"email_id": token},
+                    {
+                        "country": update_data["country"],
+                        "email_format": "H",
+                        "language": update_data["lang"],
+                        "has_opted_out_of_email": False,
+                        "updated_timestamp": str(datetime.now()),
+                    },
+                )
 
-            braze.set_subscription_status(data["email"], braze_ids, "subscribed")
-            new_user = {"email": data["email"], "email_id": token}
+                braze.set_subscription_status(data["email"], braze_ids, "subscribed")
+                new_user = {"email": data["email"], "email_id": token}
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:
             send_confirm_message.delay(

@@ -223,7 +223,7 @@ class BrazeClient:
         """
         Set subscription status for the specified newsletters
 
-        https://www.braze.com/docs/api/endpoints/subscription_groups/post_update_user_subscription_group_status/
+        https://www.braze.com/docs/api/endpoints/subscription_groups/post_update_user_subscription_group_status_v2
 
         """
 

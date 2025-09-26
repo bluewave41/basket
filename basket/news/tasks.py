@@ -303,10 +303,11 @@ def upsert_contact(api_call_type, data, user_data):
                         "has_opted_out_of_email": False,
                         "updated_timestamp": str(datetime.now()),
                         "double_opt_in": False,
+                        "subscription_groups": [
+                            {"subscription_group_id": str(n), "subscription_state": "subscribed", "emails": [data["email"]]} for n in braze_ids
+                        ],
                     },
                 )
-
-                braze.set_subscription_status(data["email"], braze_ids, "subscribed")
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:
             send_confirm_message.delay(

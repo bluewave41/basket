@@ -294,18 +294,19 @@ def upsert_contact(api_call_type, data, user_data):
                 braze.track_user(
                     data["email"],
                     None,
-                    {"email_id": token},
+                    {"email_id": new_user.get("email", {}).get("email_id")},
                     {
+                        "basket_token": token,
                         "country": update_data["country"],
                         "email_format": "H",
                         "language": update_data["lang"],
                         "has_opted_out_of_email": False,
                         "updated_timestamp": str(datetime.now()),
+                        "double_opt_in": False,
                     },
                 )
 
                 braze.set_subscription_status(data["email"], braze_ids, "subscribed")
-                new_user = {"email": data["email"], "email_id": token}
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:
             send_confirm_message.delay(
@@ -336,6 +337,10 @@ def upsert_contact(api_call_type, data, user_data):
         ctms_add_or_update.delay(update_data, user_data)
     else:
         ctms.update(user_data, update_data)
+        if settings.BRAZE_SUBSCRIBE_ENABLE:
+            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
+            if len(braze_ids) != 0:
+                braze.set_subscription_status(data["email"], braze_ids, "subscribed")
 
     # In the rare case the user hasn't confirmed their email and is subscribing to the same newsletter, send the confirmation again.
     # We catch this by checking if the user `optin` is `False` and if the `update_data["newsletters"]` is empty.

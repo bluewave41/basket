@@ -297,9 +297,9 @@ def upsert_contact(api_call_type, data, user_data):
                     {"email_id": new_user.get("email", {}).get("email_id")},
                     {
                         "basket_token": token,
-                        "country": update_data["country"],
+                        "country": update_data.get("country"),
                         "email_format": "H",
-                        "language": update_data["lang"],
+                        "language": update_data.get("lang"),
                         "has_opted_out_of_email": False,
                         "updated_timestamp": str(datetime.now()),
                         "double_opt_in": False,

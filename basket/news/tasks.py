@@ -289,7 +289,7 @@ def upsert_contact(api_call_type, data, user_data):
 
             if settings.BRAZE_SUBSCRIBE_ENABLE:
                 # map the newsletter slugs to braze ids
-                braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
+                braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
 
                 braze.track_user(
                     data["email"],
@@ -339,7 +339,7 @@ def upsert_contact(api_call_type, data, user_data):
     else:
         ctms.update(user_data, update_data)
         if settings.BRAZE_SUBSCRIBE_ENABLE:
-            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
+            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
             if len(braze_ids) != 0:
                 braze.set_subscription_status(data["email"], braze_ids, "subscribed")
 

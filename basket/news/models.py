@@ -24,12 +24,6 @@ class BlockedEmail(models.Model):
 
 
 class Newsletter(models.Model):
-    braze_id = models.UUIDField(
-        unique=True,
-        help_text="The ID for the subscription group in Braze",
-        blank=True,
-        null=True,
-    )
     slug = models.SlugField(
         unique=True,
         help_text="The ID for the newsletter that will be used by clients",

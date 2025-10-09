@@ -43,7 +43,7 @@ class BrazeEndpoint(Enum):
     USERS_EXPORT_IDS = "/users/export/ids"
     USERS_TRACK = "/users/track"
     USERS_DELETE = "/users/delete"
-    SUBSCRIPTION_STATUS_SET = "/subscription/status/set"
+    SUBSCRIPTION_STATUS_SET = "/v2/subscription/status/set"
 
 
 class BrazeClient:
@@ -219,7 +219,7 @@ class BrazeClient:
 
         return self._request(BrazeEndpoint.CAMPAIGNS_TRIGGER_SEND, data)
 
-    def set_subscription_status(self, email, newsletters):
+    def set_subscription_status(self, email, newsletters, subscription_state):
         """
         Set subscription status for the specified newsletters
 
@@ -227,7 +227,11 @@ class BrazeClient:
 
         """
 
-        data = {}
+        data = {
+            "subscription_groups": [
+                {"subscription_group_id": str(n), "subscription_state": subscription_state, "emails": [email]} for n in newsletters
+            ]
+        }
 
         return self._request(BrazeEndpoint.SUBSCRIPTION_STATUS_SET, data)
 

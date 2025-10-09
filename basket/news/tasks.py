@@ -281,10 +281,15 @@ def upsert_contact(api_call_type, data, user_data):
         # no user found. create new one.
         token = update_data["token"] = generate_token()
         if settings.MAINTENANCE_MODE:
+            # cTms call
             ctms_add_or_update.delay(update_data)
         else:
             # cTms call
             new_user = ctms.add(update_data)
+
+            # get the newsletters we need to subscribe to
+            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("braze_id", flat=True)
+
             braze.track_user(
                 data["email"],
                 None,
@@ -297,6 +302,8 @@ def upsert_contact(api_call_type, data, user_data):
                     "updated_timestamp": str(datetime.now()),
                 },
             )
+
+            braze.set_subscription_status(data["email"], braze_ids, "subscribed")
             new_user = {"email": data["email"], "email_id": token}
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:

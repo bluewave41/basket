@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -282,7 +283,20 @@ def upsert_contact(api_call_type, data, user_data):
         if settings.MAINTENANCE_MODE:
             ctms_add_or_update.delay(update_data)
         else:
-            braze.track_user(data["email"], None, {"email_id": token})
+            # cTms call
+            new_user = ctms.add(update_data)
+            braze.track_user(
+                data["email"],
+                None,
+                {"email_id": token},
+                {
+                    "country": update_data["country"],
+                    "email_format": "H",
+                    "language": update_data["lang"],
+                    "has_opted_out_of_email": False,
+                    "updated_timestamp": str(datetime.now()),
+                },
+            )
             new_user = {"email": data["email"], "email_id": token}
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:

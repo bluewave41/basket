@@ -150,7 +150,7 @@ class BrazeClient:
                 attributes["basket_token"] = basket_token
 
         data = {
-            "attributes": [attributes | custom_attributes],
+            "attributes": [attributes | (custom_attributes or {})],
         }
         # Events. Event names are based off of the message ID and trigger email sends in Braze.
         if event:

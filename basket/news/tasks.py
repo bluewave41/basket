@@ -252,10 +252,10 @@ def upsert_contact(api_call_type, data, user_data):
         cur_newsletters,
     )
     send_confirm = False
+    to_subscribe_slugs = [nl for nl, sub in update_data["newsletters"].items() if sub]
 
     if api_call_type != UNSUBSCRIBE:
         # Check for newsletter-specific user updates
-        to_subscribe_slugs = [nl for nl, sub in update_data["newsletters"].items() if sub]
         check_optin = not (forced_optin or (user_data and user_data.get("optin")))
         check_mofo = not (user_data and user_data.get("mofo_relevant"))
 
@@ -282,8 +282,6 @@ def upsert_contact(api_call_type, data, user_data):
         # no user found. create new one.
         token = update_data["token"] = generate_token()
         vendor_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
-        log.info("NEWSLETTERS")
-        log.info(vendor_ids)
         if settings.MAINTENANCE_MODE:
             ctms_add_or_update.delay(update_data)
 

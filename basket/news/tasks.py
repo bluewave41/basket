@@ -5,6 +5,8 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.cache import cache
 
+import sentry_sdk
+
 from basket import metrics
 from basket.base.decorators import rq_task
 from basket.base.exceptions import BasketError
@@ -33,7 +35,6 @@ from basket.news.utils import (
 )
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
 
 
 def fxa_source_url(metrics):
@@ -280,34 +281,26 @@ def upsert_contact(api_call_type, data, user_data):
     if user_data is None:
         # no user found. create new one.
         token = update_data["token"] = generate_token()
+        vendor_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
+        log.info("NEWSLETTERS")
+        log.info(vendor_ids)
         if settings.MAINTENANCE_MODE:
-            # cTms call
             ctms_add_or_update.delay(update_data)
+
+            try:
+                braze_subscribe.delay(vendor_ids, data["email"], ctms.get(update_data["token"]), token, update_data)
+            except Exception as e:
+                sentry_sdk.capture_exception()
+                log.error(f"Braze user subscribe error: {e}")
         else:
-            # cTms call
             new_user = ctms.add(update_data)
 
             if settings.BRAZE_SUBSCRIBE_ENABLE:
-                # map the newsletter slugs to braze ids
-                braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
-
-                braze.track_user(
-                    data["email"],
-                    None,
-                    {"email_id": new_user.get("email", {}).get("email_id")},
-                    {
-                        "basket_token": token,
-                        "country": update_data.get("country"),
-                        "email_format": "H",
-                        "language": update_data.get("lang"),
-                        "has_opted_out_of_email": False,
-                        "updated_timestamp": str(datetime.now()),
-                        "double_opt_in": False,
-                        "subscription_groups": [
-                            {"subscription_group_id": str(n), "subscription_state": "subscribed", "emails": [data["email"]]} for n in braze_ids
-                        ],
-                    },
-                )
+                try:
+                    braze_subscribe(vendor_ids, data["email"], new_user, token, update_data)
+                except Exception as e:
+                    sentry_sdk.capture_exception()
+                    log.error(f"Braze user subscribe error: {e}")
 
         if send_confirm and settings.SEND_CONFIRM_MESSAGES:
             send_confirm_message.delay(
@@ -339,9 +332,13 @@ def upsert_contact(api_call_type, data, user_data):
     else:
         ctms.update(user_data, update_data)
         if settings.BRAZE_SUBSCRIBE_ENABLE:
-            braze_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
-            if len(braze_ids) != 0:
-                braze.set_subscription_status(data["email"], braze_ids, "subscribed")
+            vendor_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
+            if len(vendor_ids) != 0:
+                try:
+                    braze.set_subscription_status(data["email"], vendor_ids, "subscribed")
+                except Exception as e:
+                    sentry_sdk.capture_exception()
+                    log.error(f"Braze subscription update error: {e}")
 
     # In the rare case the user hasn't confirmed their email and is subscribing to the same newsletter, send the confirmation again.
     # We catch this by checking if the user `optin` is `False` and if the `update_data["newsletters"]` is empty.
@@ -363,6 +360,32 @@ def upsert_contact(api_call_type, data, user_data):
         )
 
     return token, False
+
+
+@rq_task
+def braze_subscribe(vendor_ids, email, user, token, update_data):
+    braze.track_user(
+        email,
+        None,
+        {"email_id": user.get("email", {}).get("email_id")},
+        {
+            "basket_token": token,
+            "country": update_data.get("country"),
+            "email_format": "H",
+            "language": update_data.get("lang"),
+            "has_opted_out_of_email": False,
+            "updated_timestamp": str(datetime.now()),
+            "double_opt_in": False,
+            "subscription_groups": [
+                {
+                    "subscription_group_id": str(n),
+                    "subscription_state": "subscribed",
+                    "emails": [email],
+                }
+                for n in vendor_ids
+            ],
+        },
+    )
 
 
 @rq_task

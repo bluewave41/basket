@@ -179,7 +179,7 @@ def test_braze_delete_users(braze_client):
         assert m.last_request.json() == expected
 
 
-def test_braze_set_subscription_status(braze_client):
+def test_braze_set_subscription_group_status(braze_client):
     email = "test@test.com"
     expected = {
         "subscription_groups": [
@@ -192,7 +192,7 @@ def test_braze_set_subscription_status(braze_client):
     }
     with requests_mock.mock() as m:
         m.register_uri("POST", "http://test.com/v2/subscription/status/set", json={})
-        braze_client.set_subscription_status(email, ["test"], "subscribed")
+        braze_client.set_subscription_group_status(email, ["test"], "subscribed")
         assert m.last_request.json() == expected
 
 

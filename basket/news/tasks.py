@@ -1,9 +1,9 @@
 import logging
-from datetime import datetime
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.cache import cache
+from django.utils import timezone
 
 import sentry_sdk
 
@@ -333,7 +333,7 @@ def upsert_contact(api_call_type, data, user_data):
             vendor_ids = Newsletter.objects.filter(slug__in=to_subscribe_slugs).values_list("vendor_id", flat=True)
             if len(vendor_ids) != 0:
                 try:
-                    braze.set_subscription_status(data["email"], vendor_ids, "subscribed")
+                    braze.set_subscription_group_status(data["email"], vendor_ids, "subscribed")
                 except Exception as e:
                     sentry_sdk.capture_exception()
                     log.error(f"Braze subscription update error: {e}")
@@ -362,17 +362,39 @@ def upsert_contact(api_call_type, data, user_data):
 
 @rq_task
 def braze_subscribe(vendor_ids, email, user, token, update_data):
+    time = timezone.now().isoformat()
     braze.track_user(
         email,
         None,
         {"email_id": user.get("email", {}).get("email_id")},
         {
-            "basket_token": token,
+            "newsletters_v1": [
+                {
+                    "created_at": {"$time": time},
+                    "newsletter_lang": update_data.get("lang"),
+                    "newsletter_name": name,
+                    "newsletter_source": update_data["source_url"],
+                    "subscribed": True,
+                    "updated_at": {"$time": time},
+                }
+                for name in update_data["newsletters"]
+            ],
+            "update_timestamp": time,
+            "user_attributes_v1": [
+                {
+                    "basket_token": token,
+                    "created_at": {"$time": time},
+                    "email_lang": update_data.get("lang"),
+                    "fxa_created_at": {"$time": time},
+                    "has_fxa": False,
+                    "mailing_country": update_data.get("country"),
+                    "updated_at": {"$time": time},
+                }
+            ],
             "country": update_data.get("country"),
             "email_format": "H",
             "language": update_data.get("lang"),
             "has_opted_out_of_email": False,
-            "updated_timestamp": str(datetime.now()),
             "double_opt_in": False,
             "subscription_groups": [
                 {

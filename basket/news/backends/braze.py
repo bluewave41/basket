@@ -219,7 +219,7 @@ class BrazeClient:
 
         return self._request(BrazeEndpoint.CAMPAIGNS_TRIGGER_SEND, data)
 
-    def set_subscription_status(self, email, vendor_ids, subscription_state):
+    def set_subscription_group_status(self, email, vendor_ids, subscription_state):
         """
         Set subscription status for the specified newsletters
 

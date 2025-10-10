@@ -368,17 +368,6 @@ def braze_subscribe(vendor_ids, email, user, token, update_data):
         None,
         {"email_id": user.get("email", {}).get("email_id")},
         {
-            "newsletters_v1": [
-                {
-                    "created_at": {"$time": time},
-                    "newsletter_lang": update_data.get("lang"),
-                    "newsletter_name": name,
-                    "newsletter_source": update_data["source_url"],
-                    "subscribed": True,
-                    "updated_at": {"$time": time},
-                }
-                for name in update_data["newsletters"]
-            ],
             "update_timestamp": time,
             "user_attributes_v1": [
                 {

@@ -42,6 +42,10 @@ class BrazeUserNotFoundByEmailError(Exception):
     pass
 
 
+class BrazeUserNotFoundByFxaIdError(Exception):
+    pass
+
+
 class BrazeClientError(Exception):
     pass  # any other error
 
@@ -53,6 +57,7 @@ class BrazeEndpoint(Enum):
     USERS_DELETE = "/users/delete"
     SUBSCRIPTION_USER_STATUS = "/subscription/user/status"
     USERS_MIGRATE_EXTERNAL_ID = "/users/external_ids/rename"
+    USERS_ADD_ALIAS = "/users/alias/new"
 
 
 class BrazeInterface:
@@ -179,7 +184,7 @@ class BrazeInterface:
 
         return self._request(BrazeEndpoint.USERS_TRACK, data)
 
-    def export_users(self, email, fields_to_export=None, external_id=None):
+    def export_users(self, email, fields_to_export=None, external_id=None, fxa_id=None):
         """
         Export user profile by identifier.
 
@@ -198,6 +203,9 @@ class BrazeInterface:
 
         if fields_to_export:
             data["fields_to_export"] = fields_to_export
+
+        if fxa_id:
+            data["user_aliases"].append({"alias_name": fxa_id, "alias_label": "fxa_id"})
 
         return self._request(BrazeEndpoint.USERS_EXPORT_IDS, data)
 
@@ -260,6 +268,14 @@ class BrazeInterface:
         https://www.braze.com/docs/api/endpoints/user_data/post_user_track/
         """
         return self._request(BrazeEndpoint.USERS_TRACK, braze_user_data)
+
+    def add_fxa_id_alias(self, external_id, fxa_id):
+        """
+        Adds the fxa_id user alias to an existing user in Braze.
+        https://www.braze.com/docs/api/endpoints/user_data/post_user_alias
+        """
+        data = {"user_aliases": [{"alias_name": fxa_id, "alias_label": "fxa_id", "external_id": external_id}]}
+        return self._request(BrazeEndpoint.USERS_ADD_ALIAS, data)
 
     def migrate_external_id(self, migrations):
         """
@@ -325,8 +341,10 @@ class Braze:
                 "first_name",
                 "language",
                 "last_name",
+                "user_aliases",
             ],
             token,
+            fxa_id,
         )
 
         if user_response["users"]:
@@ -338,28 +356,28 @@ class Braze:
             return self.from_vendor(user_data, subscriptions)
 
     def add(self, data):
-        custom_attributes = {"_update_existing_only": False}
-
-        # If we don't have an `email_id`, we need to submit the user alias.
-        if not data.get("email_id"):
-            custom_attributes["user_alias"] = {"alias_name": data["email"], "alias_label": "email"}
-
-        braze_user_data = self.to_vendor(None, data, custom_attributes)
+        braze_user_data = self.to_vendor(None, data)
+        external_id = braze_user_data["external_id"]
         self.interface.save_user(braze_user_data)
-        return {"email": {"email_id": data.get("email_id")}}
+
+        if external_id and data.get("fxa_id"):
+            self.interface.add_fxa_id_alias(external_id, data["fxa_id"])
+
+        return {"email": {"email_id": external_id}}
 
     def update(self, existing_data, update_data):
         braze_user_data = self.to_vendor(existing_data, update_data)
+        external_id = braze_user_data["external_id"]
         self.interface.save_user(braze_user_data)
 
-    def update_by_alt_id(self, alt_id_name, alt_id_value, update_data):
-        raise NotImplementedError
+        if external_id and update_data.get("fxa_id") and existing_data.get("fxa_id") != update_data["fxa_id"]:
+            self.interface.add_fxa_id_alias(external_id, update_data["fxa_id"])
 
     def update_by_fxa_id(self, fxa_id, update_data):
-        raise NotImplementedError
-
-    def update_by_token(self, token, update_data):
-        raise NotImplementedError
+        existing_user = self.get(fxa_id=fxa_id)
+        if not existing_user:
+            raise BrazeUserNotFoundByFxaIdError
+        self.update(existing_user, update_data)
 
     def delete(self, email):
         """
@@ -369,15 +387,15 @@ class Braze:
         @return: deleted user data if successful
         @raises: BrazeUserNotFoundByEmailError
         """
-        data = self.interface.export_users(email=email, fields_to_export=["external_id"])
+        data = self.interface.export_users(email=email, fields_to_export=["external_id", "user_aliases"])
         if not data["users"]:
             raise BrazeUserNotFoundByEmailError
 
         email_id = data["users"][0].get("external_id")
+        fxa_id = self.get_fxa_id_from_aliases(data["users"][0].get("user_aliases"))
         self.interface.delete_user(email)
-        # return in list of email_id to match CTMS.delete
-        # TODO also return fxa_id once it's added as an alias
-        return [{"email_id": email_id}]
+        # return in list of {email_id, fxa_id} to match CTMS.delete
+        return [{"email_id": email_id, "fxa_id": fxa_id}]
 
     def from_vendor(self, braze_user_data, subscription_groups):
         """
@@ -391,7 +409,7 @@ class Braze:
 
         basket_user_data = {
             "email": braze_user_data["email"],
-            "email_id": braze_user_data["external_id"],  # TODO: conditional on migration status config (could be basket token instead)
+            "email_id": braze_user_data["external_id"],
             "id": braze_user_data["braze_id"],
             "first_name": braze_user_data.get("first_name"),
             "last_name": braze_user_data.get("last_name"),
@@ -407,18 +425,23 @@ class Braze:
             "fxa_lang": user_attributes.get("fxa_lang"),
             "fxa_primary_email": user_attributes.get("fxa_primary_email"),
             "fxa_create_date": user_attributes.get("fxa_created_at") if user_attributes.get("has_fxa") else None,
-            # TODO: missing field: fxa_id
+            "has_fxa": user_attributes.get("has_fxa"),
+            "fxa_id": self.get_fxa_id_from_aliases(braze_user_data.get("user_aliases")),
         }
 
         return basket_user_data
 
-    def to_vendor(self, basket_user_data=None, update_data=None, custom_attributes=None, events=None):
+    def to_vendor(self, basket_user_data=None, update_data=None, events=None):
         existing_user_data = basket_user_data or {}
         updated_user_data = existing_user_data | (update_data or {})
 
         now = timezone.now().isoformat()
-        country = process_country(updated_user_data.get("country"))
-        language = process_lang(updated_user_data.get("lang"))
+        country = process_country(updated_user_data.get("country") or None)
+        language = process_lang(updated_user_data.get("lang") or None)
+
+        external_id = (
+            updated_user_data.get("token") if not existing_user_data and settings.BRAZE_ONLY_WRITE_ENABLE else updated_user_data.get("email_id")
+        )
 
         subscription_groups = []
         if update_data and isinstance(update_data.get("newsletters"), dict):
@@ -433,10 +456,10 @@ class Braze:
                     )
 
         user_attributes = {
-            "external_id": updated_user_data.get("email_id"),  # TODO: conditional on migration status config (could be basket token instead)
+            "external_id": external_id,
             "email": updated_user_data.get("email"),
             "update_timestamp": now,
-            "_update_existing_only": True,
+            "_update_existing_only": bool(existing_user_data),
             "email_subscribe": "opted_in" if updated_user_data.get("optin") else "unsubscribed" if updated_user_data.get("optout") else "subscribed",
             "subscription_groups": subscription_groups,
             "user_attributes_v1": [
@@ -446,32 +469,35 @@ class Braze:
                     "email_lang": language,
                     "mailing_country": country,
                     "updated_at": {"$time": now},
-                    "has_fxa": bool(updated_user_data.get("fxa_create_date")),
+                    "has_fxa": bool(updated_user_data.get("fxa_id")) or updated_user_data.get("has_fxa", False),
                     "fxa_created_at": updated_user_data.get("fxa_create_date"),
                     "fxa_first_service": updated_user_data.get("fxa_service"),
                     "fxa_lang": updated_user_data.get("fxa_lang"),
                     "fxa_primary_email": updated_user_data.get("fxa_primary_email"),
-                    # TODO: missing field: fxa_id
                 }
             ],
         }
 
         # Country, language, first and last name are billable data points. Only update them when necessary.
-        if country != process_country(existing_user_data.get("country")):
+        if country != process_country(existing_user_data.get("country") or None):
             user_attributes["country"] = country
-        if language != process_lang(existing_user_data.get("language")):
+        if language != process_lang(existing_user_data.get("language") or None):
             user_attributes["language"] = language
         if (first_name := updated_user_data.get("first_name")) != existing_user_data.get("first_name"):
             user_attributes["first_name"] = first_name
         if (last_name := updated_user_data.get("last_name")) != existing_user_data.get("last_name"):
             user_attributes["last_name"] = last_name
 
-        braze_data = {"attributes": [user_attributes | (custom_attributes or {})]}
+        braze_data = {"attributes": [user_attributes]}
 
         if events:
             braze_data["events"] = events
 
         return braze_data
+
+    def get_fxa_id_from_aliases(user_aliases):
+        if user_aliases:
+            return next((user_alias["alias_name"] for user_alias in user_aliases if user_alias.get("alias_label") == "fxa_id"), None)
 
 
 braze = Braze(BrazeInterface(settings.BRAZE_BASE_API_URL, settings.BRAZE_API_KEY))

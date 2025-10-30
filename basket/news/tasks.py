@@ -8,7 +8,7 @@ from basket import metrics
 from basket.base.decorators import rq_task
 from basket.base.exceptions import BasketError
 from basket.base.utils import email_is_testing
-from basket.news.backends.braze import braze
+from basket.news.backends.braze import BrazeUserNotFoundByFxaIdError, braze
 from basket.news.backends.ctms import (
     CTMSNotFoundByAltIDError,
     CTMSUniqueIDConflictError,
@@ -65,7 +65,7 @@ def fxa_email_changed(data, use_braze_backend=False):
         # FxA record not found, try email
         user_data = get_user_data(email=email, extra_fields=["id", "email_id"], use_braze_backend=use_braze_backend)
         if user_data:
-            if use_braze_backend and settings.BRAZE_FXA_MIGRATION_COMPLETE:
+            if use_braze_backend:
                 braze.update(user_data, {"fxa_id": fxa_id, "fxa_primary_email": email})
             else:
                 ctms.update(user_data, {"fxa_id": fxa_id, "fxa_primary_email": email})
@@ -80,7 +80,6 @@ def fxa_email_changed(data, use_braze_backend=False):
             backend_data = data.copy()
             contact = None
             if use_braze_backend:
-                # This doesn't return the user??? What do we do here?
                 contact = braze.add(backend_data)
             else:
                 contact = ctms.add(backend_data)
@@ -97,11 +96,11 @@ def fxa_direct_update_contact(fxa_id, data, use_braze_backend=False):
     Ignore if contact with FxA ID can't be found
     """
     try:
-        if use_braze_backend and settings.BRAZE_FXA_MIGRATION_COMPLETE:
-            braze.update_by_alt_id("fxa_id", fxa_id, data, use_braze_backend)
+        if use_braze_backend:
+            braze.update_by_fxa_id(fxa_id, data)
         else:
             ctms.update_by_alt_id("fxa_id", fxa_id, data)
-    except CTMSNotFoundByAltIDError:
+    except (CTMSNotFoundByAltIDError, BrazeUserNotFoundByFxaIdError):
         # No associated record found, skip this update.
         pass
 
@@ -192,8 +191,8 @@ def fxa_login(data, use_braze_backend=False):
 @rq_task
 def update_user_meta(token, data, use_braze_backend=False):
     """Update a user's metadata, not newsletters"""
-    if use_braze_backend:
-        braze.update_by_token(token, data)
+    if use_braze_backend and settings.BRAZE_ONLY_WRITE_ENABLE:
+        braze.update({"email_id": token}, data)
     else:
         try:
             ctms.update_by_alt_id("token", token, data)
